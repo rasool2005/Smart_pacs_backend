@@ -2,11 +2,10 @@ from rest_framework import serializers
 from .models import PatientStudy, PersonalInfo, User
 from django.contrib.auth.hashers import make_password
 from django.contrib.auth.hashers import check_password
-from .models import Patient,PersonalInfo,AIReport
+from .models import Patient,PersonalInfo,AIReport,ScanPrediction
 from django.core.validators import validate_email
 from django.core.exceptions import ValidationError
 import re   # 🔥 ADD THIS LINE
-
 
 class RegisterSerializer(serializers.ModelSerializer):
     confirm_password = serializers.CharField(write_only=True)
@@ -298,3 +297,27 @@ class AIReportSerializer(serializers.ModelSerializer):
         model = AIReport
         fields = '__all__'
         read_only_fields = ['user', 'created_at', 'updated_at']
+
+
+from rest_framework import serializers
+
+
+class SendOTPSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+
+
+class VerifyOTPSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    otp = serializers.CharField(max_length=6)
+
+
+class ResetPasswordSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    otp = serializers.CharField(max_length=6)
+    new_password = serializers.CharField()
+
+class ScanPredictionSerializer(serializers.ModelSerializer):
+
+    class Meta:
+        model = ScanPrediction
+        fields = "__all__"

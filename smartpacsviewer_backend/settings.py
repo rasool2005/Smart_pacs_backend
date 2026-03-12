@@ -25,7 +25,7 @@ SECRET_KEY = 'django-insecure-)x^b!bp5(s^-7u4xg$^g=(-570ty6twymy072#+$b2&f%a$5v$
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['*', '0.0.0.0','192.168.23.1', '192.168.137.134', '172.23.52.14','172.23.52.110','10.205.9.206','10.205.220.206']
+ALLOWED_HOSTS = ['*', '0.0.0.0','10.217.33.206', '192.168.137.134', '172.23.52.14','172.23.52.110','172.23.49.93','10.205.220.206']
 
 
 # Application definition
@@ -78,8 +78,12 @@ WSGI_APPLICATION = 'smartpacsviewer_backend.wsgi.application'
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': 'django.db.backends.mysql',
+        'NAME': 'smart_pacs_viewers',
+        'USER': 'root',
+        'PASSWORD': '',
+        'HOST': 'localhost',
+        'PORT': '3306',
     }
 }
 
@@ -133,6 +137,17 @@ CORS_ALLOWED_ORIGINS = [
     'http://172.23.52.110:8000',
     'http://10.205.9.206:8000',
     'http://10.35.248.206:8000',
+    'http://10.217.33.206:8000',
 ]
+
+
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+
+EMAIL_HOST = 'smtp.gmail.com'
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+
+EMAIL_HOST_USER = 'khadarrasool2005@gmail.com'
+EMAIL_HOST_PASSWORD = 'wdsr bpcs xvdk phjp'
 
 CORS_ALLOW_CREDENTIALS = True

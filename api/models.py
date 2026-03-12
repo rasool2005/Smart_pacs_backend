@@ -1,4 +1,6 @@
 from django.db import models
+from django.utils.timezone import now
+from datetime import timedelta
 
 class User(models.Model):
     name = models.CharField(max_length=100)
@@ -61,6 +63,7 @@ class AIReport(models.Model):
     ]
 
     user = models.ForeignKey(User, on_delete=models.CASCADE)
+    patient_name = models.CharField(max_length=255, default="Unknown Patient")
     
     examination_type = models.CharField(max_length=20, choices=EXAM_CHOICES)
 
@@ -73,9 +76,48 @@ class AIReport(models.Model):
     severity = models.CharField(max_length=100)
 
     impression = models.TextField()
+    scan_image = models.TextField(blank=True, null=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return f"{self.examination_type} - {self.finding_name}"
+
+
+
+class PasswordResetOTP(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    otp = models.CharField(max_length=6)
+    is_verified = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def is_expired(self):
+        return now() > self.created_at + timedelta(minutes=5)
+
+    def __str__(self):
+        return f"{self.user.email} - {self.otp}"
+    
+class OTPModel(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    otp = models.CharField(max_length=6)
+    is_verified = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+class ScanPrediction(models.Model):
+
+    SCAN_TYPES = [
+        ('CT', 'CT Scan'),
+        ('MRI', 'MRI Scan'),
+        ('XRAY', 'X-Ray'),
+    ]
+
+    file = models.ImageField(upload_to="scans/")
+    scan_type = models.CharField(max_length=10, choices=SCAN_TYPES, blank=True, null=True)
+    confidence_score = models.FloatField(blank=True, null=True)
+    confidence_level = models.CharField(max_length=20, blank=True, null=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Scan {self.id} - {self.scan_type}"

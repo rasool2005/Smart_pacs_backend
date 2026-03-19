@@ -2,7 +2,7 @@ from rest_framework import serializers
 from .models import PatientStudy, PersonalInfo, User
 from django.contrib.auth.hashers import make_password
 from django.contrib.auth.hashers import check_password
-from .models import Patient,PersonalInfo,AIReport,ScanPrediction
+from .models import Patient,PersonalInfo,AIReport,ScanPrediction,AIChat
 from django.core.validators import validate_email
 from django.core.exceptions import ValidationError
 import re   # 🔥 ADD THIS LINE
@@ -57,7 +57,8 @@ class PatientSerializer(serializers.ModelSerializer):
             "address",
             "email",
             "blood_type",
-            "allergies"
+            "allergies",
+            "doctor"
         ]
 
     # Required field validation
@@ -106,7 +107,8 @@ class FetchPatientSerializer(serializers.ModelSerializer):
             "address",
             "email",
             "blood_type",
-            "allergies"
+            "allergies",
+            "doctor"
         ]
         read_only_fields = fields
 
@@ -321,3 +323,9 @@ class ScanPredictionSerializer(serializers.ModelSerializer):
     class Meta:
         model = ScanPrediction
         fields = "__all__"
+
+
+class AIChatSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AIChat
+        fields = ['id', 'question', 'answer', 'created_at', 'updated_at']

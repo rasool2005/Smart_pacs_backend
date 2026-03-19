@@ -18,7 +18,7 @@ from .serializers import (
     AIReportSerializer,
 )
 
-from .models import Patient, PatientStudy, PersonalInfo, User, AIReport
+from .models import Patient, PatientStudy, PersonalInfo, User, AIReport, AIChat
 
 import os
 import os
@@ -99,10 +99,20 @@ def login(request):
 
 @api_view(['POST'])
 def add_patient(request):
+    doctor_id = request.data.get('doctor_id')
     serializer = PatientSerializer(data=request.data)
 
     if serializer.is_valid():
+        # Link to doctor if provided
         patient = serializer.save()
+        if doctor_id:
+            try:
+                doctor = User.objects.get(id=doctor_id)
+                patient.doctor = doctor
+                patient.save()
+            except User.DoesNotExist:
+                pass
+        
         return Response({
             "status": "success",
             "patient_id": patient.id,
@@ -117,7 +127,13 @@ def add_patient(request):
 
 @api_view(['GET'])
 def fetch_patients(request):
-    patients = Patient.objects.all().order_by('-id')
+    doctor_id = request.query_params.get('doctor_id')
+    
+    if doctor_id:
+        patients = Patient.objects.filter(doctor_id=doctor_id).order_by('-id')
+    else:
+        # Fallback to all if no filter provided (though ideally we should always filter)
+        patients = Patient.objects.all().order_by('-id')
 
     if patients.exists():
         serializer = FetchPatientSerializer(patients, many=True)
@@ -128,9 +144,33 @@ def fetch_patients(request):
         })
 
     return Response({
-        "status": "error",
-        "message": "No patients found"
+        "status": "success", # Changed to success even if 0 patients for easier frontend handling
+        "count": 0,
+        "patients": [],
+        "message": "No patients found for this doctor"
     })
+
+
+@api_view(['DELETE'])
+def delete_patient(request, patient_id):
+    """Delete a patient record by ID"""
+    try:
+        patient = Patient.objects.get(id=patient_id)
+        patient.delete()
+        return Response({
+            "status": "success",
+            "message": "Patient deleted successfully"
+        }, status=status.HTTP_200_OK)
+    except Patient.DoesNotExist:
+        return Response({
+            "status": "error",
+            "message": "Patient not found"
+        }, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        return Response({
+            "status": "error",
+            "message": str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 # ===========================
@@ -165,9 +205,17 @@ def get_user_studies(request):
             "message": "user_id is required"
         }, status=status.HTTP_400_BAD_REQUEST)
 
-    studies = PatientStudy.objects.filter(
-        user_id=user_id
-    ).order_by("-id")
+    try:
+        # Ensure user_id is treated as an integer for filtering
+        target_user_id = int(user_id)
+        studies = PatientStudy.objects.filter(
+            user_id=target_user_id
+        ).order_by("-id")
+    except ValueError:
+        return Response({
+            "status": "error",
+            "message": f"Invalid user_id format: {user_id}"
+        }, status=status.HTTP_400_BAD_REQUEST)
 
     serializer = StudySerializer(studies, many=True)
 
@@ -179,6 +227,28 @@ def get_user_studies(request):
             "confirmed": studies.filter(status="confirmed").count()
         }
     })
+
+
+@api_view(['DELETE'])
+def delete_study(request, study_id):
+    """Delete a study record by ID"""
+    try:
+        study = PatientStudy.objects.get(id=study_id)
+        study.delete()
+        return Response({
+            "status": "success",
+            "message": "Study deleted successfully"
+        }, status=status.HTTP_200_OK)
+    except PatientStudy.DoesNotExist:
+        return Response({
+            "status": "error",
+            "message": "Study not found"
+        }, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        return Response({
+            "status": "error",
+            "message": str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 # ===========================
@@ -221,7 +291,7 @@ def get_personal_info(request):
         }, status=status.HTTP_404_NOT_FOUND)
 
     try:
-        personal_info = PersonalInfo.objects.get(id=user_id)
+        personal_info = PersonalInfo.objects.get(user_id=user_id)
         serializer = PersonalInfoSerializer(personal_info)
 
         return Response({
@@ -309,8 +379,10 @@ def save_ai_report(request):
 
     serializer = AIReportSerializer(data=request.data)
 
+    patient_id = request.data.get("patient_id")
+
     if serializer.is_valid():
-        report = serializer.save(user=user)
+        report = serializer.save(user=user, patient_id=patient_id)
         return Response({
             "status": "success", 
             "message": "AI Report saved successfully",
@@ -323,11 +395,18 @@ def save_ai_report(request):
 @api_view(['GET'])
 def get_ai_reports(request):
     user_id = request.GET.get("user_id")
+    patient_id = request.GET.get("patient_id")
 
-    if not user_id:
-        return Response({"status": "error", "message": "user_id is required"}, status=400)
+    if not user_id and not patient_id:
+        return Response({"status": "error", "message": "user_id or patient_id is required"}, status=400)
 
-    reports = AIReport.objects.filter(user_id=user_id).order_by("-id")
+    reports = AIReport.objects.all()
+    if user_id:
+        reports = reports.filter(user_id=user_id)
+    if patient_id:
+        reports = reports.filter(patient_id=patient_id)
+    
+    reports = reports.order_by("-id")
     serializer = AIReportSerializer(reports, many=True)
 
     return Response({
@@ -725,3 +804,77 @@ def reset_password(request):
 
     except User.DoesNotExist:
         return Response({"error": "User not found"}, status=404)
+
+
+# ===========================
+# AI CHAT API
+# ===========================
+
+@api_view(['GET'])
+def ai_chat(request):
+    user_query = request.GET.get('query', '').lower().strip()
+
+    if not user_query:
+        return Response({
+            "status": "error",
+            "response": "I am designed to assist only with radiology imaging queries (X-ray, CT, MRI)."
+        })
+
+    # Ratio-based scoring:
+    # For each DB entry: score = total_matched_keyword_length * (matched/total DB words)
+    # This ensures "mri" query matches the "mri" entry (ratio=1.0)
+    # rather than "hyperintensity mri" (ratio=0.5)
+    best_score = 0.0
+    best_answer = None
+
+    for item in AIChat.objects.all():
+        db_words = item.question.lower().split()
+        if not db_words:
+            continue
+        matched_words = [word for word in db_words if word in user_query]
+        if not matched_words:
+            continue
+        raw_score = sum(len(w) for w in matched_words)
+        ratio = len(matched_words) / len(db_words)
+        final_score = raw_score * ratio
+        if final_score > best_score:
+            best_score = final_score
+            best_answer = item.answer
+
+    # Return best match only if score is meaningful
+    if best_answer and best_score >= 2.0:
+        return Response({
+            "status": "success",
+            "response": best_answer
+        })
+
+    # Scope check — reject non-radiology queries
+    radiology_keywords = [
+        "x-ray", "xray", "ct", "mri", "scan", "radiology", "imaging",
+        "fracture", "tumor", "lesion", "opacity", "hemorrhage", "stroke",
+        "effusion", "pneumonia", "chest", "brain", "spine", "lung", "bone",
+        "knee", "shoulder", "abdomen", "pelvis", "liver", "kidney"
+    ]
+    is_radiology = any(kw in user_query for kw in radiology_keywords)
+
+    if not is_radiology:
+        return Response({
+            "status": "error",
+            "response": "I am designed to assist only with radiology imaging queries (X-ray, CT, MRI)."
+        })
+
+    # Radiology topic but no DB match — return generic structured response
+    return Response({
+        "status": "success",
+        "response": (
+            "1. Observations:\n"
+            "Specific imaging features for this query require further clinical context.\n\n"
+            "2. Possible Findings:\n"
+            "Findings may vary based on modality and anatomical region.\n\n"
+            "3. Differential Diagnosis:\n"
+            "Broad categories including inflammatory, neoplastic, or vascular etiologies.\n\n"
+            "4. Recommendation:\n"
+            "Further evaluation with targeted imaging or clinical correlation is suggested.\n\n"
+            "This analysis is AI-assisted and should be reviewed by a qualified radiologist or physician."
+        )
+    })

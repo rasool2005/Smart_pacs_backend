@@ -54,3 +54,4 @@ model.fit(train_data, validation_data=test_data, epochs=10)
 
 model.save("scan_model.h5")
 print("Model saved successfully!")
++

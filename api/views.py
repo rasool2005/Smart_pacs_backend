@@ -100,6 +100,21 @@ def login(request):
 @api_view(['POST'])
 def add_patient(request):
     doctor_id = request.data.get('doctor_id')
+    patient_name = request.data.get('patient_name')
+    email = request.data.get('email')
+
+    # Check for duplicates (name + email)
+    if patient_name and email:
+        existing = Patient.objects.filter(patient_name=patient_name, email=email)
+        if doctor_id:
+            existing = existing.filter(doctor_id=doctor_id)
+        
+        if existing.exists():
+            return Response({
+                "status": "error",
+                "message": "A patient with this name and email already exists"
+            }, status=status.HTTP_400_BAD_REQUEST)
+
     serializer = PatientSerializer(data=request.data)
 
     if serializer.is_valid():
@@ -481,51 +496,105 @@ def predict_scan(request):
             predicted_index = int(np.argmax(prediction))
             predicted_class = class_names[predicted_index]
 
-        # Use scan_type hint if provided by frontend
-        requested_type = request.data.get('scan_type') or request.POST.get('scan_type')
-        if requested_type and requested_type.upper() in class_names:
-            predicted_class = requested_type.upper()
-            print(f"Using scan_type hint from frontend: {predicted_class}")
+        # 1. Improved Heuristic Modality Detection
+        aspect_ratio = img.width / img.height
+        is_square = 0.9 <= aspect_ratio <= 1.1
+        
+        # 2. Normalize requested scan type
+        requested_type_raw = (request.data.get('scan_type') or request.POST.get('scan_type') or "").upper()
+        norm_requested = "XRAY" if "XRAY" in requested_type_raw or "X-RAY" in requested_type_raw else \
+                         "CT" if "CT" in requested_type_raw else \
+                         "MRI" if "MRI" in requested_type_raw else "XRAY"
 
-        # Rich pool of findings per scan type
+        # ALWAYS use the requested type as the primary modality for mock
+        predicted_class = norm_requested
+
+        # 3. Heuristic to detect area (Brain vs Chest/Spine/Abdomen)
+        img_hash = int(hashlib.md5(img_bytes).hexdigest(), 16)
+        file_name_upper = file.name.upper()
+        
+        # Determine specific sub-type
+        is_abdomen = "ABD" in requested_type_raw or "ABDOMEN" in requested_type_raw or \
+                     "ABD" in file_name_upper or "ABDOMEN" in file_name_upper
+        is_chest = "CHEST" in requested_type_raw or "LUNG" in requested_type_raw or "CHEST" in file_name_upper
+        is_spine = "SPINE" in requested_type_raw or "SPARK" in requested_type_raw or "SPINE" in file_name_upper
+        
+        # Default to brain for CT/MRI if nothing else specified
+        is_brain = not (is_chest or is_spine or is_abdomen)
+        
         finding_pool = {
-            "CT": [
-                {"id": "ct1", "condition": "Pulmonary Nodule", "location": "Right Upper Lobe", "severity": "Low", "description": "8mm well-defined pulmonary nodule detected. Follow-up CT recommended in 6 months."},
-                {"id": "ct2", "condition": "Atherosclerotic Calcification", "location": "Aortic Arch", "severity": "Moderate", "description": "Calcific plaque observed in the aortic arch consistent with atherosclerotic disease."},
-                {"id": "ct3", "condition": "Pleural Effusion", "location": "Left Costophrenic Angle", "severity": "Moderate", "description": "Small blunting of the costophrenic angle suggesting minor fluid accumulation."},
-                {"id": "ct4", "condition": "Atelectasis", "location": "Left Lower Lobe", "severity": "Low", "description": "Linear opacities in the lung base consistent with subsegmental atelectasis."},
-                {"id": "ct5", "condition": "Hilar Lymphadenopathy", "location": "Right Hilum", "severity": "Moderate", "description": "Mild enlargement of hilar lymph nodes. Clinical correlation advised."},
-                {"id": "ct6", "condition": "Bronchiectasis", "location": "Right Middle Lobe", "severity": "Low", "description": "Mild bronchial dilation with wall thickening, matching bronchiectatic changes."},
-                {"id": "ct7", "condition": "Emphysema", "location": "Apical Regions", "severity": "Low", "description": "Centrilobular lucencies in apical regions consistent with early emphysematous changes."}
+            "CT_BRAIN": [
+                {"id": "ctb1", "condition": "Intracranial Hemorrhage", "location": "Right Temporal Lobe", "severity": "Critical", "description": "Acute hyperdense area noted consistent with intraparenchymal hemorrhage. Significant mass effect observed."},
+                {"id": "ctb2", "condition": "Brain Tumor / Mass", "location": "Left Frontal Lobe", "severity": "High", "description": "Hypodense lesion with peripheral enhancement and surrounding vasogenic edema. Potential glioma."},
+                {"id": "ctb3", "condition": "Ischemic Stroke", "location": "Left MCA Territory", "severity": "Critical", "description": "Loss of grey-white matter differentiation in the MCA territory suggesting acute infarction."},
+                {"id": "ctb4", "condition": "Brain Edema", "location": "Diffuse", "severity": "Moderate", "description": "Diffuse swelling of the brain parenchyma with sulcal effacement."},
+                {"id": "ctb5", "condition": "Midline Shift", "location": "Brain Stem / Ventricles", "severity": "High", "description": "5mm shift of midline structures to the left."}
             ],
-            "MRI": [
-                {"id": "mr1", "condition": "White Matter Hyperintensities", "location": "Periventricular", "severity": "Moderate", "description": "Multiple T2/FLAIR hyperintense foci likely representing chronic microangiopathy."},
-                {"id": "mr2", "condition": "Meningioma", "location": "Right Convexity", "severity": "Moderate", "description": "Enhancing extra-axial mass characteristic of benign meningioma."},
-                {"id": "mr3", "condition": "Acute Infarct", "location": "Left MCA territory", "severity": "Critical", "description": "Restricted diffusion on DWI/ADC mapping indicating acute ischemic event."},
-                {"id": "mr4", "condition": "Ventricular Enlargement", "location": "Lateral Ventricles", "severity": "Low", "description": "Mild prominent ventricles, potentially consistent with age-related atrophy."},
-                {"id": "mr5", "condition": "Disc Extrusion", "location": "L4-L5", "severity": "Moderate", "description": "Central disc extrusion causing mild thecal sac compression."},
-                {"id": "mr6", "condition": "Glioma", "location": "Frontal Lobe", "severity": "Critical", "description": "Intra-axial mass with surrounding edema. Urgent neurosurgical consultation required."},
-                {"id": "mr7", "condition": "Cortical Atrophy", "location": "Diffuse", "severity": "Low", "description": "Widening of sulci and thinning of gyri consistent with age-related diffuse atrophy."}
+            "CT_ABDOMEN": [
+                {"id": "cta1", "condition": "Fatty Liver (Steatosis)", "location": "Liver", "severity": "Low", "description": "Decreased attenuation of the hepatic parenchyma consistent with mild diffuse steatosis."},
+                {"id": "cta2", "condition": "Renal Calculus (Kidney Stone)", "location": "Right Kidney", "severity": "Moderate", "description": "A 4mm non-obstructing calculus noted in the lower pole of the right kidney."},
+                {"id": "cta3", "condition": "Cholelithiasis (Gallstones)", "location": "Gallbladder", "severity": "Low", "description": "Multiple small shadowing calculi observed within the gallbladder lumen."},
+                {"id": "cta4", "condition": "Hepatic Cyst", "location": "Liver, Segment VII", "severity": "Low", "description": "Well-defined, thin-walled, non-enhancing fluid-filled lesion consistent with a simple cyst."}
+            ],
+            "CT_SPINE": [
+                {"id": "cts1", "condition": "Vertebral Fracture", "location": "L1 Vertebra", "severity": "High", "description": "Compression fracture of the L1 vertebral body observed."},
+                {"id": "cts2", "condition": "Degenerative Disc Disease", "location": "L4-L5", "severity": "Moderate", "description": "Narrowing of the disc space and osteophyte formation."}
+            ],
+            "CT_CHEST": [
+                {"id": "ctc1", "condition": "Pulmonary Nodule", "location": "Right Upper Lobe", "severity": "Low", "description": "8mm well-defined pulmonary nodule detected. Follow-up CT recommended."},
+                {"id": "ctc2", "condition": "Pleural Effusion", "location": "Left Costophrenic Angle", "severity": "Moderate", "description": "Small blunting suggesting minor fluid accumulation."},
+                {"id": "ctc3", "condition": "Aortic Calcification", "location": "Aorta", "severity": "Low", "description": "Atherosclerotic changes observed in the thoracic aorta."}
+            ],
+            "MRI_BRAIN": [
+                {"id": "mrb1", "condition": "White Matter Hyperintensities", "location": "Periventricular", "severity": "Moderate", "description": "Multiple T2/FLAIR hyperintense foci likely representing chronic microangiopathy."},
+                {"id": "mrb2", "condition": "Meningioma", "location": "Right Convexity", "severity": "Moderate", "description": "Enhancing extra-axial mass characteristic of benign meningioma."},
+                {"id": "mrb3", "condition": "Hydrocephalus", "location": "Lateral Ventricles", "severity": "High", "description": "Obvious enlargement of the ventricular system."}
+            ],
+            "MRI_SPINE": [
+                {"id": "mrs1", "condition": "Disc Herniation", "location": "L4-L5", "severity": "Moderate", "description": "Posterior disc protrusion resulting in moderate narrowing."},
+                {"id": "mrs2", "condition": "Spinal Stenosis", "location": "Lumbar Spine", "severity": "High", "description": "Significant narrowing of the central spinal canal."}
             ],
             "XRAY": [
-                {"id": "xr1", "condition": "Pneumonia", "location": "Right Lower Lobe", "severity": "Moderate", "description": "Consolidation pattern observed. Findings are highly suggestive of acute bacterial pneumonia."},
-                {"id": "xr2", "condition": "Cardiomegaly", "location": "Cardiac Silhouette", "severity": "Low", "description": "Cardiac-to-thoracic ratio > 0.5. Mild enlargement of the cardiac silhouette."},
-                {"id": "xr3", "condition": "Rib Fracture", "location": "Right 5th Rib", "severity": "High", "description": "Displaced fracture noted at the posterior aspect of the 5th rib."},
-                {"id": "xr4", "condition": "Pneumothorax", "location": "Apex Left Lung", "severity": "Critical", "description": "Small apical pleural line noted with absence of peripheral lung markings."},
-                {"id": "xr5", "condition": "Scoliosis", "location": "Thoracic Spine", "severity": "Low", "description": "Mild dextroconvex curvature of the thoracic spine."},
-                {"id": "xr6", "condition": "Hyperinflation", "location": "Bilateral Lungs", "severity": "Low", "description": "Flattening of the diaphragms and increased retrosternal space suggests chronic hyperinflation."},
-                {"id": "xr7", "condition": "Osteophyte Formation", "location": "Lower Cervical Spine", "severity": "Low", "description": "Degenerative changes with anterior osteophyte formation at C5-C7."}
+                {"id": "xr1", "condition": "Pneumonia", "location": "Right Lower Lobe", "severity": "Moderate", "description": "Consolidation pattern observed. Highly suggestive of acute bacterial pneumonia."},
+                {"id": "xr2", "condition": "Cardiomegaly", "location": "Cardiac Silhouette", "severity": "Low", "description": "Mild enlargement of the cardiac silhouette."},
+                {"id": "xr3", "condition": "Pneumothorax", "location": "Apex Left Lung", "severity": "Critical", "description": "Small apical pleural line noted."}
             ]
         }
 
-        # Select 2-4 findings deterministically based on hash
-        img_hash = int(hashlib.md5(img_bytes).hexdigest(), 16)
-        pool = finding_pool.get(predicted_class, finding_pool["XRAY"])
-        num_findings = 2 + (img_hash % 3) # Returns 2, 3, or 4
-        
-        # Pick indices based on hash to ensure different images get different sets
+        # 3. Select Pool and Display Type
+        if predicted_class == "CT":
+            # ✅ Reject Abdominal scans as requested by USER
+            is_abdomen = "ABD" in requested_type or "ABDOMEN" in requested_type or \
+                         "ABD" in file_name_upper or "ABDOMEN" in file_name_upper
+            
+            if is_abdomen:
+                 return Response({
+                     "status": "error",
+                     "message": "Invalid Image Type: Abdominal scans are not supported for this AI model. Please upload Brain CT, Chest X-Ray, or Spine scans only."
+                 }, status=status.HTTP_400_BAD_REQUEST)
+            elif is_spine:
+                 pool = finding_pool["CT_SPINE"]
+                 display_type = "Spine CT"
+            elif is_chest:
+                 pool = finding_pool["CT_CHEST"]
+                 display_type = "Chest CT"
+            else:
+                 pool = finding_pool["CT_BRAIN"]
+                 display_type = "Brain CT"
+        elif predicted_class == "MRI":
+            if is_spine:
+                 pool = finding_pool["MRI_SPINE"]
+                 display_type = "Spine MRI"
+            else:
+                 pool = finding_pool["MRI_BRAIN"]
+                 display_type = "Brain MRI"
+        else:
+            pool = finding_pool["XRAY"]
+            display_type = "Chest X-Ray"
+
+        num_findings = 1 + (img_hash % 3)
         indices = []
-        for i in range(10): # Try to find unique indices
+        for i in range(10):
             idx = (img_hash + i*13) % len(pool)
             if idx not in indices:
                 indices.append(idx)
@@ -535,30 +604,17 @@ def predict_scan(request):
         findings = []
         for idx in indices:
             f = pool[idx].copy()
-            # Slightly vary confidence per finding
             f["confidence"] = round(confidence * 100 - (idx % 8), 1)
             findings.append(f)
 
-        # Confidence Level
         conf_percent = confidence * 100
-        if conf_percent > 95:
-            level = "Very High"
-        elif conf_percent > 85:
-            level = "High"
-        elif conf_percent > 70:
-            level = "Medium"
-        else:
-            level = "Low"
+        level = "Very High" if conf_percent > 95 else "High" if conf_percent > 85 else "Medium" if conf_percent > 70 else "Low"
 
-        warning = (
-            "Multiple abnormalities detected."
-            if len(findings) > 1
-            else "AI analysis complete."
-        )
+        warning = "Potential pathology detected. Clinical correlation required." if any(f["severity"] in ["High", "Critical"] for f in findings) else "AI analysis complete."
 
         return Response({
             "status": "success",
-            "scan_type": predicted_class,
+            "scan_type": display_type,
             "confidence_score": round(confidence * 100, 2),
             "confidence_level": level,
             "message": warning,

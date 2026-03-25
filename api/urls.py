@@ -1,11 +1,12 @@
 from django.urls import path
-from .views import add_patient, fetch_patients, get_personal_info, get_user_studies, login, register, reset_password, save_personal_info, schedule_appointment, send_otp, update_profile, change_password, save_ai_report, get_ai_reports, predict_scan, download_report, send_report_email, verify_otp, delete_ai_report, delete_study, ai_chat
+from .views import add_patient, fetch_patients, get_personal_info, get_user_studies, login, register, reset_password, save_personal_info, schedule_appointment, send_otp, update_profile, change_password, save_ai_report, get_ai_reports, predict_scan, download_report, send_report_email, verify_otp, delete_ai_report, delete_study, ai_chat, delete_patient
 
 urlpatterns = [
     path('register/', register),
     path('login/', login),
     path('add-patient/', add_patient),
     path('patients/', fetch_patients),
+    path('delete-patient/<int:patient_id>/', delete_patient),
     path('schedule-study/', schedule_appointment),
     path('user-studies/', get_user_studies),
     path('delete-study/<int:study_id>/', delete_study),

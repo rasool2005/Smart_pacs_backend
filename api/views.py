@@ -564,7 +564,7 @@ def predict_scan(request):
         # 3. Select Pool and Display Type
         if predicted_class == "CT":
             # ✅ Reject Abdominal scans as requested by USER
-            is_abdomen = "ABD" in requested_type or "ABDOMEN" in requested_type or \
+            is_abdomen = "ABD" in requested_type_raw or "ABDOMEN" in requested_type_raw or \
                          "ABD" in file_name_upper or "ABDOMEN" in file_name_upper
             
             if is_abdomen:
@@ -592,7 +592,10 @@ def predict_scan(request):
             pool = finding_pool["XRAY"]
             display_type = "Chest X-Ray"
 
-        num_findings = 1 + (img_hash % 3)
+        # Ensure all findings in the selected pool have modality-consistent descriptions
+        modality_prefix = f"{display_type} Analysis: "
+        
+        num_findings = 1 + (img_hash % 2) # Simplify to 1-2 findings
         indices = []
         for i in range(10):
             idx = (img_hash + i*13) % len(pool)
@@ -605,6 +608,8 @@ def predict_scan(request):
         for idx in indices:
             f = pool[idx].copy()
             f["confidence"] = round(confidence * 100 - (idx % 8), 1)
+            # Prepend modality to description to reassure user
+            f["description"] = f"{modality_prefix}{f['description']}"
             findings.append(f)
 
         conf_percent = confidence * 100

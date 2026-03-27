@@ -19,6 +19,7 @@ class Patient(models.Model):
     email = models.EmailField(blank=True, null=True)
     blood_type = models.CharField(max_length=10, blank=True, null=True)
     allergies = models.TextField(blank=True, null=True)
+    doctor = models.ForeignKey(User, on_delete=models.CASCADE, related_name='patients', null=True, blank=True)
 
     def __str__(self):
         return self.patient_name
@@ -63,6 +64,7 @@ class AIReport(models.Model):
     ]
 
     user = models.ForeignKey(User, on_delete=models.CASCADE)
+    patient_id = models.IntegerField(null=True, blank=True)
     patient_name = models.CharField(max_length=255, default="Unknown Patient")
     
     examination_type = models.CharField(max_length=20, choices=EXAM_CHOICES)
@@ -121,3 +123,13 @@ class ScanPrediction(models.Model):
 
     def __str__(self):
         return f"Scan {self.id} - {self.scan_type}"
+
+
+class AIChat(models.Model):
+    question = models.TextField()
+    answer = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.question
